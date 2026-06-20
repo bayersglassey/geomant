@@ -1,7 +1,7 @@
 import re
 import string
 from typing import List, Tuple, Union, Optional
-from functools import wraps
+from functools import wraps, partial
 
 
 MAX_DEPTH = 25
@@ -326,6 +326,66 @@ def _cli(parser: Parser):
         except KeyboardInterrupt:
             print('bye!')
             return
+
+
+class Walker:
+    """
+
+        >>> parser = Parser()
+        >>> term = parser.parse('3f x.(y.a b)')
+
+        >>> walker = Walker()
+        >>> def func(walker):
+        ...     name = walker.walk_stack[-1]
+        ...     print('*' * walker.walk_depth + f'{name}: {walker.call_stack}')
+        >>> for name in 'fxabc':
+        ...     walker.register(name, func)
+        >>> walker.walk(term)
+        ***f: [3]
+        *****a: ['x', 'y']
+        ****b: ['x']
+
+    """
+
+    def __init__(self, *, verbose: bool = False):
+        self.walk_stack = []
+        self.call_stack = []
+        self.verbose = verbose
+        self.funcs = {}
+
+    def register(self, name: str, func=None, decorator=False):
+        if func is None:
+            # We're being used as a decorator!
+            return partial(self.register, name, decorator=True)
+        if name in self.funcs:
+            raise Exception(f"Already registered: {name!r} -> {self.funcs[name]}")
+        self.funcs[name] = func
+        if decorator:
+            return func
+
+    @property
+    def walk_depth(self) -> int:
+        return len(self.walk_stack)
+
+    def walk(self, term: Term):
+        self.walk_stack.append(term)
+        if self.verbose:
+            print('  ' * self.walk_depth + f"Walking: {term!r}")
+        try:
+            if isinstance(term, list):
+                for child in term:
+                    self.walk(child)
+            elif isinstance(term, tuple):
+                self.call_stack.append(term[0])
+                try:
+                    self.walk(term[1])
+                finally:
+                    self.call_stack.pop()
+            elif isinstance(term, str):
+                func = self.funcs[term]
+                func(self)
+        finally:
+            self.walk_stack.pop()
 
 
 if __name__ == '__main__':
