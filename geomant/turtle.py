@@ -16,6 +16,29 @@ Term = Union[
 ]
 
 
+def pprint_term(term: Term, depth=0, indented=True):
+    """Pretty-prints a term
+
+        >>> pprint_term((3, 'f'))
+        3.f
+        >>> pprint_term((3, ['f', 'g']))
+        3.:
+          f
+          g
+
+    """
+    indent = '  ' * depth if indented else ''
+    if isinstance(term, list):
+        print(indent + ':')
+        for child in term:
+            pprint_term(child, depth + 1)
+    elif isinstance(term, tuple):
+        print(indent + str(term[0]) + '.', end='')
+        pprint_term(term[1], depth, indented=False)
+    else:
+        print(indent + str(term))
+
+
 class ParseError(Exception):
     pass
 
@@ -24,7 +47,13 @@ class Parser:
     """Parses syntax trees (called "terms") for a little language.
 
         >>> parser = Parser()
+        >>> parser.parse('')
+        []
+        >>> parser.parse(' ')
+        []
         >>> parser.parse('f')
+        ['f']
+        >>> parser.parse(' f ')
         ['f']
         >>> parser.parse('fl')
         ['f', 'l']
@@ -48,12 +77,18 @@ class Parser:
         [('f', ('l', 'f'))]
         >>> parser.parse('f(lf)')
         [('f', ['l', 'f'])]
+        >>> parser.parse('f(l f)')
+        [('f', ['l', 'f'])]
         >>> parser.parse('(lf)')
         ['l', 'f']
         >>> parser.parse('()')
         []
         >>> parser.parse('()()')
         [([], [])]
+        >>> parser.parse(' ( )( ) ')
+        [([], [])]
+        >>> parser.parse(' ( ) ( ) ')
+        []
 
         >>> parser.parse('$foo $bar')
         ['foo', 'bar']
@@ -245,7 +280,7 @@ class Parser:
         if '=' in line:
             # This line is a variable assignment
             name = next_token()
-            if not isinstance(name, str):
+            if not isinstance(name, str) or name[0] not in string.ascii_uppercase:
                 raise error(f"Can't use {name!r} as a variable name")
             next_token()
             expect('=')
@@ -257,40 +292,35 @@ class Parser:
             next_token()
             return get_terms(check_end=True)
 
+    def cli(self):
+        yield from _cli(self)
 
-def main():
+
+def _cli(parser: Parser):
     """Little CLI program for testing"""
-
-    def pprint(term, depth=0, indented=True):
-        indent = '  ' * depth if indented else ''
-        if isinstance(term, list):
-            print(indent + ':')
-            for child in term:
-                pprint(child, depth + 1)
-        elif isinstance(term, tuple):
-            print(indent + str(term[0]) + '.', end='')
-            pprint(term[1], depth, indented=False)
-        else:
-            print(indent + str(term))
-
-    parser = Parser()
     while True:
         try:
             text = input('> ')
-            if text and text[0] == '/':
+            if text and text[0] == '\\':
                 cmd = text[1:]
-                if cmd == 'vars':
+                if cmd == 'v':
                     for name, term in parser.vars.items():
                         print(f'{name}=', end='')
-                        pprint(term)
-                elif cmd == 'exit':
+                        pprint_term(term)
+                elif cmd.startswith('v '):
+                    name = cmd[2:]
+                    term = parser.vars.get(name)
+                    if term is None:
+                        print(f"Unset variable: {name!r}")
+                    else:
+                        print(f'{name}=', end='')
+                        pprint_term(term)
+                elif cmd == 'q':
                     return
                 else:
-                    print("Unrecognized command")
+                    print(f"Unrecognized command: {cmd!r}")
             else:
-                terms = parser.parse(text)
-                for term in terms:
-                    pprint(term)
+                yield from parser.parse(text)
         except ParseError as ex:
             print(ex)
         except KeyboardInterrupt:
@@ -299,4 +329,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    for term in Parser().cli():
+        pprint_term(term)
