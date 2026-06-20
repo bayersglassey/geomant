@@ -1,7 +1,9 @@
 import re
 import string
+from inspect import isgeneratorfunction
 from typing import List, Tuple, Union, Optional
-from functools import wraps, partial
+from functools import wraps, partial, partialmethod
+from contextlib import ExitStack, contextmanager
 
 
 MAX_DEPTH = 25
@@ -37,6 +39,36 @@ def pprint_term(term: Term, depth=0, indented=True):
         pprint_term(term[1], depth, indented=False)
     else:
         print(indent + str(term))
+
+
+def flatten_term(term: Term) -> Term:
+    """
+
+        >>> flatten_term(3)
+        3
+        >>> flatten_term('f')
+        'f'
+        >>> flatten_term([1, 2])
+        [1, 2]
+        >>> flatten_term((1, 2))
+        [1, 2]
+        >>> flatten_term([(1, 2), [3, 4]])
+        [1, 2, 3, 4]
+        >>> flatten_term(((1, 2), [3, 4]))
+        [1, 2, 3, 4]
+
+    """
+    if isinstance(term, (list, tuple)):
+        terms = []
+        for child in term:
+            child = flatten_term(child)
+            if isinstance(child, list):
+                terms.extend(child)
+            else:
+                terms.append(child)
+        return terms
+    else:
+        return term
 
 
 class ParseError(Exception):
@@ -331,61 +363,116 @@ def _cli(parser: Parser):
 class Walker:
     """
 
-        >>> parser = Parser()
-        >>> term = parser.parse('3f x.(y.a b)')
-
         >>> walker = Walker()
-        >>> def func(walker):
-        ...     name = walker.walk_stack[-1]
-        ...     print('*' * walker.walk_depth + f'{name}: {walker.call_stack}')
-        >>> for name in 'fxabc':
-        ...     walker.register(name, func)
-        >>> walker.walk(term)
-        ***f: [3]
-        *****a: ['x', 'y']
-        ****b: ['x']
+        >>> walker.n = 0
+        >>> walker.f_count = 0
+
+        >>> def atom(walker: Walker, c: str):
+        ...     print('f' * walker.f_count + c * walker.n)
+        >>> for c in 'ab': walker.atom(c, atom)
+
+        >>> @walker.func(int)
+        ... def int_func(walker: Walker, n: int):
+        ...     walker.n += n
+        ...     try: yield
+        ...     finally: walker.n -= n
+
+        >>> @walker.func('f')
+        ... def f_func(walker: Walker, term):
+        ...     walker.f_count += 1
+        ...     try: yield
+        ...     finally: walker.f_count -= 1
+
+        >>> walker.parse('3a f(2f.ab a)')
+        aaa
+        ffaa
+        ffbb
+        f
+
+        >>> walker.parse('(2 ff)ab')
+        ffaa
+        ffbb
+        >>> walker.parse('(2f f)ab')
+        ffaa
+        ffbb
+        >>> walker.parse('(2ff)ab')
+        ffaa
+        ffbb
 
     """
 
-    def __init__(self, *, verbose: bool = False):
-        self.walk_stack = []
-        self.call_stack = []
+    def __init__(self, *, parser: Parser = None, verbose: bool = False):
+        self.parser = parser or Parser()
         self.verbose = verbose
+        self.stack = []
+        self.atoms = {}
         self.funcs = {}
 
-    def register(self, name: str, func=None, decorator=False):
+    def _register(self, key, func=None, *, thing: str, decorator=False):
+        registry = self.atoms if thing == 'atom' else self.funcs
         if func is None:
             # We're being used as a decorator!
-            return partial(self.register, name, decorator=True)
-        if name in self.funcs:
-            raise Exception(f"Already registered: {name!r} -> {self.funcs[name]}")
-        self.funcs[name] = func
+            return partial(self.func, key, decorator=True)
+        if thing == 'func' and isgeneratorfunction(func):
+            func = contextmanager(func)
+        if key in registry:
+            raise Exception(f"Already registered {thing}: {key!r} -> {registry[key]}")
+        registry[key] = func
         if decorator:
             return func
 
+    atom = partialmethod(_register, thing='atom')
+    func = partialmethod(_register, thing='func')
+
+    def _get_thing(self, term: Term, *, thing: str):
+        registry = self.atoms if thing == 'atom' else self.funcs
+        if isinstance(term, int):
+            key = int
+        elif isinstance(term, str):
+            key = term
+        else:
+            raise Exception(f"Can't be used as a {thing} key: {term!r}")
+        if key not in registry:
+            raise Exception(f"No {thing} registered for: {term!r}")
+        return registry[key]
+
+    get_atom = partialmethod(_get_thing, thing='atom')
+    get_func = partialmethod(_get_thing, thing='func')
+
     @property
-    def walk_depth(self) -> int:
-        return len(self.walk_stack)
+    def depth(self) -> int:
+        return len(self.stack)
+
+    def parse(self, text: str):
+        term = self.parser.parse(text)
+        self.walk(term)
 
     def walk(self, term: Term):
-        self.walk_stack.append(term)
+        self.stack.append(term)
         if self.verbose:
-            print('  ' * self.walk_depth + f"Walking: {term!r}")
+            print('  ' * self.depth + f"Walking: {term!r}")
         try:
             if isinstance(term, list):
                 for child in term:
                     self.walk(child)
             elif isinstance(term, tuple):
-                self.call_stack.append(term[0])
-                try:
+                key = flatten_term(term[0])
+                if isinstance(key, list):
+                    keys = flatten_term(key)
+                    ctx = ExitStack()
+                    for key in keys:
+                        func = self.get_func(key)
+                        ctx.enter_context(func(self, key))
+                else:
+                    func = self.get_func(key)
+                    ctx = func(self, key)
+                with ctx:
                     self.walk(term[1])
-                finally:
-                    self.call_stack.pop()
-            elif isinstance(term, str):
-                func = self.funcs[term]
-                func(self)
+            else:
+                atom = self.get_atom(term)
+                atom(self, term)
         finally:
-            self.walk_stack.pop()
+            self.stack.pop()
 
 
 if __name__ == '__main__':
