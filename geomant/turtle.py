@@ -48,6 +48,12 @@ class Parser:
         [('f', ('l', 'f'))]
         >>> parser.parse('f(lf)')
         [('f', ['l', 'f'])]
+        >>> parser.parse('(lf)')
+        ['l', 'f']
+        >>> parser.parse('()')
+        []
+        >>> parser.parse('()()')
+        [([], [])]
 
         >>> parser.parse('$foo $bar')
         ['foo', 'bar']
@@ -250,3 +256,47 @@ class Parser:
             # Regular line consists of a list of terms
             next_token()
             return get_terms(check_end=True)
+
+
+def main():
+    """Little CLI program for testing"""
+
+    def pprint(term, depth=0, indented=True):
+        indent = '  ' * depth if indented else ''
+        if isinstance(term, list):
+            print(indent + ':')
+            for child in term:
+                pprint(child, depth + 1)
+        elif isinstance(term, tuple):
+            print(indent + str(term[0]) + '.', end='')
+            pprint(term[1], depth, indented=False)
+        else:
+            print(indent + str(term))
+
+    parser = Parser()
+    while True:
+        try:
+            text = input('> ')
+            if text and text[0] == '/':
+                cmd = text[1:]
+                if cmd == 'vars':
+                    for name, term in parser.vars.items():
+                        print(f'{name}=', end='')
+                        pprint(term)
+                elif cmd == 'exit':
+                    return
+                else:
+                    print("Unrecognized command")
+            else:
+                terms = parser.parse(text)
+                for term in terms:
+                    pprint(term)
+        except ParseError as ex:
+            print(ex)
+        except KeyboardInterrupt:
+            print('bye!')
+            return
+
+
+if __name__ == '__main__':
+    main()
