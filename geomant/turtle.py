@@ -5,6 +5,8 @@ from typing import List, Tuple, Union, Optional
 from functools import wraps, partial, partialmethod
 from contextlib import ExitStack, contextmanager
 
+from geomant.vector import Vector, A, B, C, D, render_vecs
+
 
 MAX_DEPTH = 25
 TOKEN_REGEX = re.compile(r'-?[1-9][0-9]*|[a-zA-Z]+|\$[a-zA-Z0-9_]+| +|.')
@@ -360,119 +362,150 @@ def _cli(parser: Parser):
             return
 
 
-class Walker:
+class VectorTurtle:
     """
 
-        >>> walker = Walker()
-        >>> walker.n = 0
-        >>> walker.f_count = 0
+        >>> from string import ascii_lowercase
 
-        >>> def atom(walker: Walker, c: str):
-        ...     print('f' * walker.f_count + c * walker.n)
-        >>> for c in 'ab': walker.atom(c, atom)
+        >>> def parse(text):
+        ...     vecs = []
+        ...     turtle = VectorTurtle()
+        ...     def do_p(turtle, term, char=None):
+        ...         char = char or ascii_lowercase[len(vecs)]
+        ...         vecs.append((turtle.pos.copy(), char))
+        ...     turtle.atom('p')(do_p)
+        ...     turtle.func('p')(do_p)
+        ...     turtle.parse(text)
+        ...     print(render_vecs(vecs))
 
-        >>> @walker.func(int)
-        ... def int_func(walker: Walker, n: int):
-        ...     walker.n += n
-        ...     try: yield
-        ...     finally: walker.n -= n
+        >>> parse('pfpfplfplfplfp')
+        +--------+
+        |       f|
+        |        |
+        |       e|
+        |        |
+        |      d |
+        |a b c   |
+        +--------+
 
-        >>> @walker.func('f')
-        ... def f_func(walker: Walker, term):
-        ...     walker.f_count += 1
-        ...     try: yield
-        ...     finally: walker.f_count -= 1
+        >>> parse('p f p(z) f p')
+        +-----+
+        |a z c|
+        +-----+
 
-        >>> walker.parse('3a f(2f.ab a)')
-        aaa
-        ffaa
-        ffbb
-        f
+        >>> parse('pfplfprbp')
+        +-----+
+        |  d c|
+        |a b  |
+        +-----+
 
-        >>> walker.parse('(2 ff)ab')
-        ffaa
-        ffbb
-        >>> walker.parse('(2f f)ab')
-        ffaa
-        ffbb
-        >>> walker.parse('(2ff)ab')
-        ffaa
-        ffbb
+        >>> parse('2pfplfp')
+        +---------+
+        |        c|
+        |         |
+        |a   b    |
+        +---------+
+
+        >>> parse('frf.pfplfp')
+        +---------+
+        |a       c|
+        |    b    |
+        +---------+
+
+        >>> parse('2.frf.pfplfp')
+        +-----------------+
+        |a               c|
+        |                 |
+        |        b        |
+        +-----------------+
+
+        >>> parse('frf.ff.pfplfp')
+        +-----------------+
+        |a               c|
+        |                 |
+        |        b        |
+        +-----------------+
+
+        >>> parse('frf.2.pfplfp')
+        +-----------------+
+        |a               c|
+        |                 |
+        |        b        |
+        +-----------------+
 
     """
 
-    def __init__(self, *, parser: Parser = None, verbose: bool = False):
+    def __init__(self, parser: Parser = None):
         self.parser = parser or Parser()
-        self.verbose = verbose
-        self.stack = []
+
+        self.f = A.copy()
+        self.pos = Vector.zero()
         self.atoms = {}
         self.funcs = {}
 
-    def _register(self, key, func=None, *, thing: str, decorator=False):
-        registry = self.atoms if thing == 'atom' else self.funcs
-        if func is None:
-            # We're being used as a decorator!
-            return partial(self.func, key, decorator=True)
-        if thing == 'func' and isgeneratorfunction(func):
-            func = contextmanager(func)
-        if key in registry:
-            raise Exception(f"Already registered {thing}: {key!r} -> {registry[key]}")
-        registry[key] = func
-        if decorator:
+    def atom(self, name):
+        def decorator(func):
+            self.atoms[name] = func
             return func
+        return decorator
 
-    atom = partialmethod(_register, thing='atom')
-    func = partialmethod(_register, thing='func')
-
-    def _get_thing(self, term: Term, *, thing: str):
-        registry = self.atoms if thing == 'atom' else self.funcs
-        if isinstance(term, int):
-            key = int
-        elif isinstance(term, str):
-            key = term
-        else:
-            raise Exception(f"Can't be used as a {thing} key: {term!r}")
-        if key not in registry:
-            raise Exception(f"No {thing} registered for: {term!r}")
-        return registry[key]
-
-    get_atom = partialmethod(_get_thing, thing='atom')
-    get_func = partialmethod(_get_thing, thing='func')
-
-    @property
-    def depth(self) -> int:
-        return len(self.stack)
+    def func(self, name):
+        def decorator(func):
+            self.funcs[name] = func
+            return func
+        return decorator
 
     def parse(self, text: str):
         term = self.parser.parse(text)
-        self.walk(term)
+        self._visit(term)
 
-    def walk(self, term: Term):
-        self.stack.append(term)
-        if self.verbose:
-            print('  ' * self.depth + f"Walking: {term!r}")
-        try:
-            if isinstance(term, list):
-                for child in term:
-                    self.walk(child)
-            elif isinstance(term, tuple):
-                key = flatten_term(term[0])
-                if isinstance(key, list):
-                    keys = flatten_term(key)
-                    ctx = ExitStack()
-                    for key in keys:
-                        func = self.get_func(key)
-                        ctx.enter_context(func(self, key))
-                else:
-                    func = self.get_func(key)
-                    ctx = func(self, key)
-                with ctx:
-                    self.walk(term[1])
-            else:
-                atom = self.get_atom(term)
+    def _visit(self, term: Term):
+        if isinstance(term, str):
+            if term == 'f':
+                self.pos += self.f
+            elif term == 'b':
+                self.pos -= self.f
+            elif term == 'l':
+                self.f *= B
+            elif term == 'r':
+                self.f *= B - D
+            elif term in self.atoms:
+                atom = self.atoms[term]
                 atom(self, term)
-        finally:
-            self.stack.pop()
+            else:
+                raise Exception(f"Don't know what to do with: {term!r}")
+        elif isinstance(term, list):
+            for child in term:
+                self._visit(child)
+        elif isinstance(term, tuple):
+            func, arg = term
+            if isinstance(func, int):
+                n = func
+                self.f *= n
+                try:
+                    self._visit(arg)
+                finally:
+                    self.f //= n
+            elif isinstance(func, str) and func in self.funcs:
+                name = func
+                func = self.funcs[name]
+                func(self, name, arg)
+            else:
+                old_pos, old_f = self.pos, self.f
+                self.pos = Vector.zero()
+                self.f = A.copy()
+                try:
+                    self._visit(func)
+                    temp_f = self.pos
+                finally:
+                    self.pos, self.f = old_pos, old_f
+                self.f = self.f * temp_f
+                try:
+                    self._visit(arg)
+                finally:
+                    self.f = old_f
+        else:
+            raise Exception(f"Don't know what to do with: {term!r}")
 
 
 if __name__ == '__main__':
