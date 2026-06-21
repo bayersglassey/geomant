@@ -338,12 +338,36 @@ class Parser:
         # Remainder of line consists of a list of terms
         return get_terms(check_end=True)
 
-    def cli(self):
-        yield from _cli(self)
+    def cli(self, **kwargs):
+        yield from _cli(self, **kwargs)
 
 
-def _cli(parser: Parser):
-    """Little CLI program for testing"""
+def _cli(parser: Parser, *, input=input):
+    r"""Little CLI program for testing
+
+        >>> def input(prompt):
+        ...     return inputs.pop(0)
+
+        >>> inputs = [
+        ...     'F=fg; G=3',
+        ...     '\\v',
+        ...     '\\v G',
+        ...     '1.FG',
+        ...     '\\q',
+        ... ]
+        >>> for term in Parser().cli(input=input):
+        ...     pprint_term(term)
+        F=:
+          f
+          g
+        G=3
+        G=3
+        1.:
+          f
+          g
+          3
+
+    """
     while True:
         try:
             text = input('> ')
@@ -369,7 +393,7 @@ def _cli(parser: Parser):
                 yield from parser.parse(text)
         except ParseError as ex:
             print(ex)
-        except KeyboardInterrupt:
+        except (EOFError, KeyboardInterrupt):
             print('bye!')
             return
 
@@ -485,9 +509,9 @@ class VectorTurtle:
 
     def parse(self, text: str):
         term = self.parser.parse(text)
-        self._visit(term)
+        self.handle(term)
 
-    def _visit(self, term: Term):
+    def handle(self, term: Term):
         if isinstance(term, str):
             if term == 'f':
                 self.pos += self.f
@@ -504,14 +528,14 @@ class VectorTurtle:
                 raise Exception(f"Don't know what to do with: {term!r}")
         elif isinstance(term, list):
             for child in term:
-                self._visit(child)
+                self.handle(child)
         elif isinstance(term, tuple):
             func, arg = term
             if isinstance(func, int):
                 n = func
                 self.f *= n
                 try:
-                    self._visit(arg)
+                    self.handle(arg)
                 finally:
                     self.f //= n
             elif isinstance(func, str) and func in self.funcs:
@@ -523,13 +547,13 @@ class VectorTurtle:
                 self.pos = Vector.zero()
                 self.f = A.copy()
                 try:
-                    self._visit(func)
+                    self.handle(func)
                     temp_f = self.pos
                 finally:
                     self.pos, self.f = old_pos, old_f
                 self.f = self.f * temp_f
                 try:
-                    self._visit(arg)
+                    self.handle(arg)
                 finally:
                     self.f = old_f
         else:
