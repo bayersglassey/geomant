@@ -133,6 +133,8 @@ class Parser:
 
         >>> parser.parse('F=fr')
         []
+        >>> parser.parse('F=fr;')
+        []
         >>> parser.parse('FFl')
         ['f', 'r', 'f', 'r', 'l']
         >>> parser.parse('F.Fl')
@@ -144,6 +146,11 @@ class Parser:
         [(3, ['f', 'r'])]
         >>> parser.parse('Gfr')
         [3, 'f', 'r']
+
+        >>> parser.parse('F=fr; G=3; F G')
+        ['f', 'r', 3]
+        >>> parser.parse('Z=;xZx')
+        ['x', 'x']
 
         >>> parser.parse('Froz=$foo $bar')
         []
@@ -311,20 +318,25 @@ class Parser:
                     raise error(f"Expected end of line, found: {cur_token!r}")
             return terms
 
-        if '=' in line:
-            # This line is a variable assignment
-            name = next_token()
+        # Prime the pump...
+        next_token()
+
+        # Handle variable assignments, if any
+        while match and '=' in line[match.start():]:
+            while cur_token[0] == ' ':
+                next_token()
+            name = cur_token
             if not isinstance(name, str) or name[0] not in string.ascii_uppercase:
                 raise error(f"Can't use {name!r} as a variable name")
             next_token()
             expect('=')
-            terms = get_terms(check_end=True)
+            terms = get_terms()
+            if cur_token is not None:
+                expect(';')
             self.vars[name] = terms[0] if len(terms) == 1 else terms
-            return []
-        else:
-            # Regular line consists of a list of terms
-            next_token()
-            return get_terms(check_end=True)
+
+        # Remainder of line consists of a list of terms
+        return get_terms(check_end=True)
 
     def cli(self):
         yield from _cli(self)
@@ -405,6 +417,22 @@ class VectorTurtle:
         |         |
         |a   b    |
         +---------+
+
+        >>> parse('F=ff; pFplFp')
+        +---------+
+        |        c|
+        |         |
+        |a   b    |
+        +---------+
+
+        >>> parse('F=ff; F=FF; pFplFp')
+        +-----------------+
+        |                c|
+        |                 |
+        |                 |
+        |                 |
+        |a       b        |
+        +-----------------+
 
         >>> parse('frf.pfplfp')
         +---------+
