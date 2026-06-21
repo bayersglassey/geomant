@@ -232,7 +232,7 @@ class Parser:
                 return None
 
             # Parse a term from the token!..
-            if token[-1].isdigit():
+            if token[0].isdigit() or token[0] == '-' and token[-1].isdigit():
                 term = int(token)
                 next_token()
             elif token == '-':

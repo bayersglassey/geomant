@@ -1,6 +1,8 @@
 import operator
-from typing import Tuple, Union
+from typing import Tuple, Union, Iterable
 from itertools import repeat
+
+from geomant.turtle import Parser, Term
 
 
 VectorTuple = Tuple[int, int, int, int]
@@ -115,6 +117,10 @@ class Vector:
 
     __slots__ = ('x0', 'x1', 'x2', 'x3')
 
+    @classmethod
+    def zero(cls) -> 'Vector':
+        return cls(0, 0, 0, 0)
+
     def __init__(self, *args: int):
         self.x0, self.x1, self.x2, self.x3 = args
 
@@ -203,7 +209,193 @@ A = Vector(1, 0, 0, 0)
 B = Vector(0, 1, 0, 0)
 C = Vector(0, 0, 1, 0)
 D = Vector(0, 0, 0, 1)
-neg_A = -A
-neg_B = -B
-neg_C = -C
-neg_D = -D
+
+
+def render_vecs(vecs: Iterable[Vector], *, box: bool = True, char: str = 'x') -> str:
+    """
+
+        >>> print(render_vecs([
+        ...     (Vector.zero(), '0'),
+        ...     A, 2 * A, (3 * A, 'A'),
+        ...     B, 2 * B, (3 * B, 'B'),
+        ...     C, 2 * C, (3 * C, 'C'),
+        ...     D, 2 * D, (3 * D, 'D'),
+        ... ]))
+        +-------+
+        |D  C   |
+        |       |
+        |x x    |
+        |      B|
+        |xx  x  |
+        |  x    |
+        |0 x x A|
+        +-------+
+
+    """
+    vecs = tuple((vec, char) if not isinstance(vec, tuple) else vec
+        for vec in vecs)
+    def to_coord(v: Vector) -> Tuple[int, int]:
+        return 2 * (v.x0 + v.x1) + v.x2, -(v.x1 + 2 * (v.x2 + v.x3))
+    coords = tuple(map(to_coord, (vec for vec, char in vecs)))
+    min_x = min(x for x, y in coords)
+    min_y = min(y for x, y in coords)
+    max_x = max(x for x, y in coords)
+    max_y = max(y for x, y in coords)
+    w = max_x - min_x + 1
+    h = max_y - min_y + 1
+    pixels = [[' ' for x in range(w)] for y in range(h)]
+    for (vec, char), (x, y) in zip(vecs, coords):
+        pixels[y - min_y][x - min_x] = char
+    lines = [''.join(line) for line in pixels]
+    if box:
+        lines = ['|' + line + '|' for line in lines]
+        horiz = '+' + '-' * w + '+'
+        lines.insert(0, horiz)
+        lines.append(horiz)
+    return '\n'.join(lines)
+
+
+class VectorTurtle:
+    """
+
+        >>> from string import ascii_lowercase
+
+        >>> def parse(text):
+        ...     vecs = []
+        ...     turtle = VectorTurtle()
+        ...     def do_p(turtle, term, char=None):
+        ...         char = char or ascii_lowercase[len(vecs)]
+        ...         vecs.append((turtle.pos.copy(), char))
+        ...     turtle.atom('p')(do_p)
+        ...     turtle.func('p')(do_p)
+        ...     turtle.parse(text)
+        ...     print(render_vecs(vecs))
+
+        >>> parse('pfpfplfplfplfp')
+        +--------+
+        |       f|
+        |        |
+        |       e|
+        |        |
+        |      d |
+        |a b c   |
+        +--------+
+
+        >>> parse('p f p(z) f p')
+        +-----+
+        |a z c|
+        +-----+
+
+        >>> parse('pfplfprbp')
+        +-----+
+        |  d c|
+        |a b  |
+        +-----+
+
+        >>> parse('2pfplfp')
+        +---------+
+        |        c|
+        |         |
+        |a   b    |
+        +---------+
+
+        >>> parse('frf.pfplfp')
+        +---------+
+        |a       c|
+        |    b    |
+        +---------+
+
+        >>> parse('2.frf.pfplfp')
+        +-----------------+
+        |a               c|
+        |                 |
+        |        b        |
+        +-----------------+
+
+        >>> parse('frf.ff.pfplfp')
+        +-----------------+
+        |a               c|
+        |                 |
+        |        b        |
+        +-----------------+
+
+        >>> parse('frf.2.pfplfp')
+        +-----------------+
+        |a               c|
+        |                 |
+        |        b        |
+        +-----------------+
+
+    """
+
+    def __init__(self, parser: Parser = None):
+        self.parser = parser or Parser()
+
+        self.f = A.copy()
+        self.pos = Vector.zero()
+        self.atoms = {}
+        self.funcs = {}
+
+    def atom(self, name):
+        def decorator(func):
+            self.atoms[name] = func
+            return func
+        return decorator
+
+    def func(self, name):
+        def decorator(func):
+            self.funcs[name] = func
+            return func
+        return decorator
+
+    def parse(self, text: str):
+        term = self.parser.parse(text)
+        self._visit(term)
+
+    def _visit(self, term: Term):
+        if isinstance(term, str):
+            if term == 'f':
+                self.pos += self.f
+            elif term == 'b':
+                self.pos -= self.f
+            elif term == 'l':
+                self.f *= B
+            elif term == 'r':
+                self.f *= B - D
+            elif term in self.atoms:
+                atom = self.atoms[term]
+                atom(self, term)
+            else:
+                raise Exception(f"Don't know what to do with: {term!r}")
+        elif isinstance(term, list):
+            for child in term:
+                self._visit(child)
+        elif isinstance(term, tuple):
+            func, arg = term
+            if isinstance(func, int):
+                n = func
+                self.f *= n
+                try:
+                    self._visit(arg)
+                finally:
+                    self.f //= n
+            elif isinstance(func, str) and func in self.funcs:
+                name = func
+                func = self.funcs[name]
+                func(self, name, arg)
+            else:
+                old_pos, old_f = self.pos, self.f
+                self.pos = Vector.zero()
+                self.f = A.copy()
+                try:
+                    self._visit(func)
+                    temp_f = self.pos
+                finally:
+                    self.pos, self.f = old_pos, old_f
+                self.f = self.f * temp_f
+                try:
+                    self._visit(arg)
+                finally:
+                    self.f = old_f
+        else:
+            raise Exception(f"Don't know what to do with: {term!r}")
