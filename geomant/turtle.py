@@ -5,7 +5,7 @@ from typing import List, Tuple, Union, Optional
 from functools import wraps, partial, partialmethod
 from contextlib import ExitStack, contextmanager
 
-from geomant.vector import Vector, A, B, C, D, render_vecs
+from geomant.geom import Vector, A, B, C, D, render_vecs
 
 
 MAX_DEPTH = 25
