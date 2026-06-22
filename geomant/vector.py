@@ -1,5 +1,5 @@
 import operator
-from typing import Tuple, Union, Iterable
+from typing import Tuple, Iterable
 from itertools import repeat
 
 
@@ -141,14 +141,15 @@ class Vector:
     def __neg__(self) -> 'Vector':
         return Vector(*map(operator.neg, self.as_tuple()))
 
-    def __mul__(self, other: Union[int, 'Vector']) -> 'Vector':
-        if isinstance(other, int):
-            n = other
-            return Vector(*map(operator.mul, self.as_tuple(), repeat(n)))
-        else:
-            return Vector(*_multiply(self.as_tuple(), other.as_tuple()))
+    def __mul__(self, n: int) -> 'Vector':
+        return Vector(*map(operator.mul, self.as_tuple(), repeat(n)))
 
     __rmul__ = __mul__
+
+    def __matmul__(self, other: 'Vector') -> 'Vector':
+        return Vector(*_multiply(self.as_tuple(), other.as_tuple()))
+
+    __rmatmul__ = __matmul__
 
     def __floordiv__(self, n: int) -> 'Vector':
         return Vector(*map(operator.floordiv, self.as_tuple(), repeat(n)))
@@ -173,16 +174,16 @@ class Vector:
         self.x3 -= other.x3
         return self
 
-    def __imul__(self, other) -> 'Vector':
-        if isinstance(other, int):
-            n = other
-            self.x0 *= n
-            self.x1 *= n
-            self.x2 *= n
-            self.x3 *= n
-        else:
-            self.x0, self.x1, self.x2, self.x3 = _multiply(
-                self.as_tuple(), other.as_tuple())
+    def __imul__(self, n: int) -> 'Vector':
+        self.x0 *= n
+        self.x1 *= n
+        self.x2 *= n
+        self.x3 *= n
+        return self
+
+    def __imatmul__(self, other: 'Vector') -> 'Vector':
+        self.x0, self.x1, self.x2, self.x3 = _multiply(
+            self.as_tuple(), other.as_tuple())
         return self
 
     def __ifloordiv__(self, n: int) -> 'Vector':
@@ -199,7 +200,7 @@ class Vector:
             return Vector(1, 0, 0, 0)
         other = self.copy()
         for i in range(n - 1):
-            other *= self
+            other @= self
         return other
 
 
@@ -235,10 +236,13 @@ def render_vecs(vecs: Iterable[Vector], *, box: bool = True, char: str = 'x') ->
     def to_coord(v: Vector) -> Tuple[int, int]:
         return 2 * (v.x0 + v.x1) + v.x2, -(v.x1 + 2 * (v.x2 + v.x3))
     coords = tuple(map(to_coord, (vec for vec, char in vecs)))
-    min_x = min(x for x, y in coords)
-    min_y = min(y for x, y in coords)
-    max_x = max(x for x, y in coords)
-    max_y = max(y for x, y in coords)
+    if coords:
+        min_x = min(x for x, y in coords)
+        min_y = min(y for x, y in coords)
+        max_x = max(x for x, y in coords)
+        max_y = max(y for x, y in coords)
+    else:
+        min_x = min_y = max_x = max_y = 0
     w = max_x - min_x + 1
     h = max_y - min_y + 1
     pixels = [[' ' for x in range(w)] for y in range(h)]

@@ -518,9 +518,9 @@ class VectorTurtle:
             elif term == 'b':
                 self.pos -= self.f
             elif term == 'l':
-                self.f *= B
+                self.f @= B
             elif term == 'r':
-                self.f *= B - D
+                self.f @= B - D
             elif term in self.atoms:
                 atom = self.atoms[term]
                 atom(self, term)
@@ -551,7 +551,7 @@ class VectorTurtle:
                     temp_f = self.pos
                 finally:
                     self.pos, self.f = old_pos, old_f
-                self.f = self.f * temp_f
+                self.f = self.f @ temp_f
                 try:
                     self.handle(arg)
                 finally:
