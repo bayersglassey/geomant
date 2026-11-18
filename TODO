@@ -1,0 +1,55 @@
+
+Add R, which behaves like B for multiplication, but isn't a Vector, and can
+therefore have a more efficient implementation, and also can be meaningfully
+used with tiles.
+==> See the Transform class.
+
+
+[ ] Turn geom2018's stuff into a .so and reuse it?!?!?!?!
+[ ] Finish the Transform class in geom.py.
+    Need to support:
+        Vector + Vector
+        Vector * Transform
+        Vector * int
+        Transform + Vector
+        Transform * Transform
+        Transform * int
+        Transform ** int
+    ...and, for fun,
+        Vector @ Vector
+[ ] Do we need to be able to express the Vector / Transform stuff using
+    the turtle language?..
+    Or is that just not really the point of turtle?..
+    The point of turtle is really to have a "cursor", like a cheap-o version
+    of a mouse-controlled editor.
+
+    Well anyway, let's have a think:
+    * We want a way to add vectors: V=A 2B C
+    * We want a way to apply transformations: V T, T1 T2, etc
+    * We want a way to specify powers of R: R3 is equivalent to (R R R), etc
+
+    ...boom. Too easy?.. I guess basically we need a separate evaluator
+    for vectors/transformations.
+    Something like $geom(A 2B C), $geom(V T), $geom(V R3), etc.
+    And by the way, A=$vector(1 0 0 0), B=$vector(0 1 0 0), etc.
+    Orrrrrr do we want to stop having the turtle parser distinguish between
+    upper and lowercase?.. probably.
+    If not, what is R?.. R=r?.. R=$rot?..
+
+
+.....x...x......
+.....xxxxx......
+..x..x...x..x...
+...x..xxx..x....
+....x..x..x.....
+.....xx.xx......
+..xx..x.x..xx...
+....xxx.xxx.....
+.....x.x.x......
+....x.xxx.x.....
+...x.x...x.x....
+..x..x...x..x...
+.....x...x......
+.....x...x......
+......x.x.......
+.......x........

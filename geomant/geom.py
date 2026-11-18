@@ -1,5 +1,5 @@
 import operator
-from typing import Tuple, Iterable
+from typing import Tuple, Iterable, Union
 from itertools import repeat
 
 
@@ -61,13 +61,16 @@ class Vector:
            |/_/
            0 --- A
 
-        When vectors are multiplied, the unit vector B acts as a 30 degree
-        counter-clockwise rotation, i.e. B^0 = A, B^1 = B, B^2 = C, B^3 = D.
+        There is an operator, R, which applies a 30-degree counter-clockwise
+        rotation, e.g. RA = B, RB = C, etc.
+
+        When vectors are multiplied (using Python's "matrix multiplication"
+        operator, i.e. "@"), the unit vector B acts like R, C like R**2, etc.
 
         >>> v = Vector(1, 2, 0, 0)
         >>> -v
         Vector(-1, -2, 0, 0)
-        >>> 3 * v
+        >>> v * 3
         Vector(3, 6, 0, 0)
         >>> v // 2
         Vector(0, 1, 0, 0)
@@ -115,10 +118,6 @@ class Vector:
 
     __slots__ = ('x0', 'x1', 'x2', 'x3')
 
-    @classmethod
-    def zero(cls) -> 'Vector':
-        return cls(0, 0, 0, 0)
-
     def __init__(self, *args: int):
         self.x0, self.x1, self.x2, self.x3 = args
 
@@ -136,50 +135,78 @@ class Vector:
         return f'{self.__class__.__name__}({args})'
 
     def __eq__(self, other: 'Vector') -> bool:
-        return self.as_tuple() == other.as_tuple()
+        return isinstance(other, Vector) and self.as_tuple() == other.as_tuple()
 
     def __neg__(self) -> 'Vector':
         return Vector(*map(operator.neg, self.as_tuple()))
 
-    def __mul__(self, n: int) -> 'Vector':
-        return Vector(*map(operator.mul, self.as_tuple(), repeat(n)))
+    def __add__(self, other: Union['Vector', 'Transform']) -> Union['Vector', 'Transform']:
+        if isinstance(other, Vector):
+            return Vector(*map(operator.add, self.as_tuple(), other.as_tuple()))
+        elif isinstance(other, Transform):
+            return Transform(add=self) + other
+        else:
+            raise TypeError(type(other))
 
-    __rmul__ = __mul__
+    def __sub__(self, other: Union['Vector', 'Transform']) -> Union['Vector', 'Transform']:
+        if isinstance(other, Vector):
+            return Vector(*map(operator.sub, self.as_tuple(), other.as_tuple()))
+        elif isinstance(other, Transform):
+            return Transform(add=self) - other
+        else:
+            raise TypeError(type(other))
+
+    def __mul__(self, other: Union[int, 'Transform']) -> Union['Vector', 'Transform']:
+        if isinstance(other, int):
+            n = other
+            return Vector(*map(operator.mul, self.as_tuple(), repeat(n)))
+        elif isinstance(other, Transform):
+            return Transform(add=self) * other
+        else:
+            raise TypeError(type(other))
 
     def __matmul__(self, other: 'Vector') -> 'Vector':
         return Vector(*_multiply(self.as_tuple(), other.as_tuple()))
 
-    __rmatmul__ = __matmul__
-
     def __floordiv__(self, n: int) -> 'Vector':
         return Vector(*map(operator.floordiv, self.as_tuple(), repeat(n)))
 
-    def __add__(self, other: 'Vector') -> 'Vector':
-        return Vector(*map(operator.add, self.as_tuple(), other.as_tuple()))
-
-    def __sub__(self, other: 'Vector') -> 'Vector':
-        return Vector(*map(operator.sub, self.as_tuple(), other.as_tuple()))
-
-    def __iadd__(self, other: 'Vector') -> 'Vector':
-        self.x0 += other.x0
-        self.x1 += other.x1
-        self.x2 += other.x2
-        self.x3 += other.x3
-        return self
+    def __iadd__(self, other: Union['Vector', 'Transform']) -> Union['Vector', 'Transform']:
+        if isinstance(other, Vector):
+            self.x0 += other.x0
+            self.x1 += other.x1
+            self.x2 += other.x2
+            self.x3 += other.x3
+            return self
+        elif isinstance(other, Transform):
+            return Transform(add=self) + other
+        else:
+            raise TypeError(type(other))
 
     def __isub__(self, other: 'Vector') -> 'Vector':
-        self.x0 -= other.x0
-        self.x1 -= other.x1
-        self.x2 -= other.x2
-        self.x3 -= other.x3
-        return self
+        if isinstance(other, Vector):
+            self.x0 -= other.x0
+            self.x1 -= other.x1
+            self.x2 -= other.x2
+            self.x3 -= other.x3
+            return self
+        elif isinstance(other, Transform):
+            return Transform(add=self) - other
+        else:
+            raise TypeError(type(other))
 
-    def __imul__(self, n: int) -> 'Vector':
-        self.x0 *= n
-        self.x1 *= n
-        self.x2 *= n
-        self.x3 *= n
-        return self
+    def __imul__(self, other: Union[int, 'Transform']) -> Union['Vector', 'Transform']:
+        if isinstance(other, int):
+            n = other
+            self.x0 *= n
+            self.x1 *= n
+            self.x2 *= n
+            self.x3 *= n
+            return self
+        elif isinstance(other, Transform):
+            return Transform(add=self) * other
+        else:
+            raise TypeError(type(other))
 
     def __imatmul__(self, other: 'Vector') -> 'Vector':
         self.x0, self.x1, self.x2, self.x3 = _multiply(
@@ -194,31 +221,104 @@ class Vector:
         return self
 
     def __pow__(self, n: int) -> 'Vector':
+        new_self = self.copy()
+        new_self **= n
+        return new_self
+
+    def __ipow__(self, n: int) -> 'Vector':
         if n < 0:
             raise Exception(f"Negative power: {n!r}")
         if n == 0:
-            return Vector(1, 0, 0, 0)
-        other = self.copy()
-        for i in range(n - 1):
-            other @= self
-        return other
+            self.x0 = 1
+            self.x1 = self.x2 = self.x3 = 0
+            return self
+        else:
+            orig_tup = tup = self.as_tuple()
+            for i in range(n - 1):
+                tup = _multiply(tup, orig_tup)
+            self.x0, self.x1, self.x2, self.x3 = tup
+            return self
 
 
+class Transform:
+    """
+
+        >>> 
+
+    """
+
+    def __init__(self, flip: bool = False, rot: int = 0, add: Vector = None):
+        self.flip = flip
+        self.rot = rot
+        self.add = add
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}({self.flip!r}, {self.rot!r}, {self.add!r})'
+
+    def __add__(self, v: Vector) -> 'Transform':
+        new_self = self.copy()
+        new_self += v
+        return new_self
+
+    def __sub__(self, v: Vector) -> 'Transform':
+        new_self = self.copy()
+        new_self.add -= v
+        return new_self
+
+    def __mul__(self, other: 'Transform') -> 'Transform':
+        new_self = self.copy()
+        new_self *= other
+        return new_self
+
+    def __imul__(self, other: 'Transform') -> 'Transform':
+        if isinstance(other, Vector):
+            if self.flip:
+                other.flip()
+            other.rot(self.rot)
+            if self.add is not None:
+                other += self.add
+        elif isinstance(other, Transform):
+            other.add = other.add.copy() if other.add else Zero.copy()
+            if self.flip:
+                other.flip = not other.flip
+                other.rot = -other.rot
+                other.add.flip()
+            other.rot = other.rot + self.rot
+            other.add.rot(self.rot)
+            if other.add == Zero:
+                other.add = None
+        else:
+            raise TypeError(type(other))
+
+
+Zero = Vector(0, 0, 0, 0)
 A = Vector(1, 0, 0, 0)
 B = Vector(0, 1, 0, 0)
 C = Vector(0, 0, 1, 0)
 D = Vector(0, 0, 0, 1)
+R = Transform(rot=1)
+R2 = Transform(rot=2)
+R3 = Transform(rot=3)
+R4 = Transform(rot=4)
+R5 = Transform(rot=5)
+R6 = Transform(rot=6)
+R7 = Transform(rot=7)
+R8 = Transform(rot=8)
+R9 = Transform(rot=9)
+R10 = Transform(rot=10)
+R11 = Transform(rot=11)
+F = Transform(flip=True)
 
 
 def render_vecs(vecs: Iterable[Vector], *, box: bool = True, char: str = 'x') -> str:
     """
 
         >>> print(render_vecs([
-        ...     (Vector.zero(), '0'),
-        ...     A, 2 * A, (3 * A, 'A'),
-        ...     B, 2 * B, (3 * B, 'B'),
-        ...     C, 2 * C, (3 * C, 'C'),
-        ...     D, 2 * D, (3 * D, 'D'),
+        ...     (Zero, '0'),
+        ...     A, A * 2, (A * 3, 'A'),
+        ...     B, B * 2, (B * 3, 'B'),
+        ...     C, C * 2, (C * 3, 'C'),
+        ...     D, D * 2, (D * 3, 'D'),
         ... ]))
         +-------+
         |D  C   |

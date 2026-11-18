@@ -5,7 +5,7 @@ from typing import List, Tuple, Union, Optional
 from functools import wraps, partial, partialmethod
 from contextlib import ExitStack, contextmanager
 
-from geomant.geom import Vector, A, B, C, D, render_vecs
+from geomant.geom import Vector, Zero, A, B, C, D, render_vecs
 
 
 MAX_DEPTH = 25
@@ -491,7 +491,7 @@ class VectorTurtle:
         self.parser = parser or Parser()
 
         self.f = A.copy()
-        self.pos = Vector.zero()
+        self.pos = Zero.copy()
         self.atoms = {}
         self.funcs = {}
 
@@ -544,7 +544,7 @@ class VectorTurtle:
                 func(self, name, arg)
             else:
                 old_pos, old_f = self.pos, self.f
-                self.pos = Vector.zero()
+                self.pos = Zero.copy()
                 self.f = A.copy()
                 try:
                     self.handle(func)
